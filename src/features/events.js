@@ -167,12 +167,14 @@ const createParticipation = async (eventId) => {
     )
 }
 
-const completeParticipation = async (participationId) => {
+const completeParticipation = async (participationId, body) => {
     return await request(
         "POST",
         null,
         `${participationBaseRoute}/${participationId}`,
-        {}
+        {
+            body: JSON.stringify(body)
+        }
     )
 }
 

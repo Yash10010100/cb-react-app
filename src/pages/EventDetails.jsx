@@ -41,24 +41,9 @@ const EventDetails = () => {
       .then(res => {
         console.log(res.data);
         setEvent(res.data)
-        if (!res.data.participation?._id) {
-          createParticipation(id)
-            .then(res => {
-              setEvent(state => ({ ...state, participation: res.data }))
-              setTimeout(() => {
-                setPageLoading(false)
-              }, 200)
-            })
-            .catch(err => {
-              setTimeout(() => {
-                setPageLoading(false)
-              }, 200)
-            })
-        } else {
-          setTimeout(() => {
-            setPageLoading(false)
-          }, 200)
-        }
+        setTimeout(() => {
+          setPageLoading(false)
+        }, 200)
       })
       .catch(err => {
         console.log(err)
@@ -93,6 +78,16 @@ const EventDetails = () => {
       }
     }
   };
+
+  const handleCreateParticipation = async () => {
+    if (event.participation._id) {
+      navigate(`/events/${id}/register`)
+    } else {
+      const res = await createParticipation(id)
+      console.log(res);
+      navigate(`/events/${id}/register`)
+    }
+  }
 
   return pageLoading ? <PageLoader /> : (
     <PublicLayout>
@@ -222,11 +217,9 @@ const EventDetails = () => {
                   <div className='flex flex-col gap-3'>
                     {
                       event.participation?._id && event.participation.success ? <p className='text-xs text-green-600 leading-relaxed'>You have successfully registered for this event</p> :
-                        <Link to={`/events/${event._id}/register`}>
-                          <Button variant="primary" size="lg" fullWidth className="justify-center shadow-lg shadow-indigo-200">
-                            {event.participation?._id ? "Complete Registration" : "Register Now"} <ArrowRight size={18} className="ml-2" />
-                          </Button>
-                        </Link>
+                        <Button onClick={handleCreateParticipation} variant="primary" size="lg" fullWidth className="justify-center shadow-lg shadow-indigo-200">
+                          {event.participation?._id ? "Complete Registration" : "Register Now"} <ArrowRight size={18} className="ml-2" />
+                        </Button>
                     }
                   </div>
                 )}

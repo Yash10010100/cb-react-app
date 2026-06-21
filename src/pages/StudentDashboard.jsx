@@ -8,6 +8,8 @@ import MiniCalendar from '../components/dashboard/MiniCalendar';
 import { fetchStdFutureEvents } from '../features/events';
 import PageLoader from '../components/ui/PageLoader';
 import { useSelector } from 'react-redux';
+import { getDateAndTimeFromMS } from '../util/time';
+import { Link } from 'react-router-dom';
 
 const upcomingEvents = [
   { title: 'AI & Ethics Symposium', type: 'Tech', date: 'Oct 24, 2024', location: 'Grand Auditorium', attendees: 15, status: 'CONFIRMED' },
@@ -55,21 +57,23 @@ const StudentDashboard = () => {
         console.log(res.data);
         setRegisteredEvents(res.data.registeredEvents)
         setPendingRegistrations(res.data.pendingRegistrationEvents)
-        res.data.pendingRegistrationEvents.forEach(event => {
-          if (!event.participation.registrationdetail) {
-            return [...prev, {
-              urgent: Date.now() - event.lastregistrationdate < 2 * 86400000,
-              title: event.name,
-              id: event._id,
-              date: getDateAndTimeFromMS(event.date).date,
-              action: "Create Registration Form",
-              link: `/organizer/form-builder/${event._id}`,
-              btnText: "Create Form",
-              initial: event.name.split(" ").map((word) => word[0]).join(""),
-              color: ['from-indigo-800 to-indigo-600', 'from-purple-700 to-pink-600', 'from-teal-700 to-cyan-500', 'from-orange-700 to-yellow-500', 'from-red-700 to-pink-500'][Math.floor(Math.random() * 5)],
-            }]
+        const x = res.data.pendingRegistrationEvents.map(event => {
+          return {
+            urgent: Date.now() - event.lastregistrationdate < 2 * 86400000,
+            title: event.name,
+            id: event._id,
+            date: getDateAndTimeFromMS(event.date).date,
+            action: !event.participation.registrationdetail ? "Fill registration form" : event.isteamevent && event.participation.team.members.length < event.minteamsize ? "Add Team Members" : "Pay Fees",
+            link: `/events/${event._id}/register`,
+            btnText: "Go to registration",
+            initial: event.name.split(" ").map((word) => word[0]).join(""),
+            color: ['from-indigo-800 to-indigo-600', 'from-purple-700 to-pink-600', 'from-teal-700 to-cyan-500', 'from-orange-700 to-yellow-500', 'from-red-700 to-pink-500'][Math.floor(Math.random() * 5)],
           }
+
         })
+        console.log(x);
+
+        setPendingActions(x)
         setTimeout(() => {
           setLoading(false)
         }, 500)
@@ -105,17 +109,17 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {/* Left / Main */}
           <div className="xl:col-span-2 flex flex-col gap-6">
-            {/* Upcoming Events */}
+            {/* Registered Events */}
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-gray-800">Upcoming Events</h2>
+                <h2 className="font-semibold text-gray-800">Registered Events</h2>
                 <a href="#" className="text-indigo-600 text-sm font-medium hover:underline">View All</a>
               </div>
-              <div className="flex gap-4 overflow-x-auto pb-2">
-                {upcomingEvents.map((event, i) => (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {registeredEvents.map((event, i) => (
                   <EventCard key={i} event={event} />
                 ))}
               </div>
@@ -125,33 +129,23 @@ const StudentDashboard = () => {
             <div>
               <h2 className="font-semibold text-gray-800 mb-4">Required Actions</h2>
               <div className="grid md:grid-cols-2 gap-3">
-                {actions.map(({ icon: Icon, title, desc, urgent }, i) => (
+                {pendingActions.map((action, i) => (
                   <Card key={i} hover className="flex items-start gap-3">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${urgent ? 'bg-red-50' : 'bg-amber-50'}`}>
-                      <Icon size={18} className={urgent ? 'text-red-500' : 'text-amber-500'} />
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${action.urgent ? 'bg-red-50' : 'bg-amber-50'}`}>
+                      <AlertCircle size={18} className={action.urgent ? 'text-red-500' : 'text-amber-500'} />
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-800">{title}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                      <p className="text-sm font-semibold text-gray-800">{action.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{action.action}</p>
                     </div>
-                    <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
+                    <Link to={action.link} className="text-gray-300 flex-shrink-0">
+                      <ChevronRight size={16} />
+                    </Link>
                   </Card>
                 ))}
               </div>
-
-              {/* Payment action */}
-              <Card className="mt-3 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-purple-50">
-                  <CreditCard size={18} className="text-purple-500" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-gray-800">Pending Payment</p>
-                  <p className="text-xs text-gray-500">Graduation Gala early-bird ticket expires tonight.</p>
-                </div>
-                <Button variant="primary" size="sm">Pay Now</Button>
-              </Card>
             </div>
-
+            
             {/* Certificates */}
             <div>
               <div className="flex items-center justify-between mb-4">
@@ -187,8 +181,8 @@ const StudentDashboard = () => {
             <div>
               <h2 className="font-semibold text-gray-800 mb-4">Schedule</h2>
               <MiniCalendar
-                highlightedDates={[1, 8, 15, 22, 24, 26]}
-                todayHighlights={todayHighlights}
+                highlightedDates={[2, 4, 12, 15, 22, 24, 26]}
+              // todayHighlights={todayHighlights}
               />
             </div>
           </div>

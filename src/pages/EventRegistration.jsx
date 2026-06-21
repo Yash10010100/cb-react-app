@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useAsyncError } from 'react-router-dom';
-import { ArrowLeft, Users, UserPlus, CreditCard, ShieldCheck, Clock, HelpCircle, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Users, UserPlus, CreditCard, ShieldCheck, Clock, HelpCircle, CheckCircle2, Search, Plus, Trash2 } from 'lucide-react';
 import PublicLayout from '../components/layout/PublicLayout';
 import CustomRegistrationForm from '../components/CustomRegistrationForm';
 import Button from '../components/ui/Button';
-import { getEvent } from '../features/events';
+import { completeParticipation, createParticipation, getEvent } from '../features/events';
 import PageLoader from '../components/ui/PageLoader';
+import { findUser } from '../features/auth';
+import { addTeamMember, removeTeamMember } from '../features/team';
+import { useSelector } from 'react-redux';
 
 // Mock fields for the CustomRegistrationForm
 const MOCK_FIELDS = [
@@ -17,23 +20,98 @@ const MOCK_FIELDS = [
 const EventRegistration = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(Number(localStorage.getItem(id)) || 1);
   const [isTeamEvent] = useState(true); // Hardcode true for demonstration
   const [event, setEvent] = useState(null);
   const [pageLoading, setPageLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [foundUser, setFoundUser] = useState(null);
+
+  const { user } = useSelector(state => state.auth)
+
+  const avatars = ["./public/man.png", "./public/cat.png", "./public/polar-bear.png", "./public/hacker.png"]
+
+  const handleSearch = async () => {
+    setLoading(true)
+    setError("")
+    try {
+      const res = await findUser(searchQuery)
+      setFoundUser(res.data)
+      setLoading(false)
+    } catch (err) {
+      setError(err.message)
+      setFoundUser(null)
+      setLoading(false)
+      setTimeout(() => {
+        setError("")
+      }, 3000)
+    }
+  }
+
+  const handleAddMember = async () => {
+    if (!foundUser) return
+    if (foundUser._id === event.participation.participant) {
+      setError("You cannot add yourself")
+      return
+    }
+    if (event.participation.team.members.map(member => member._id).includes(foundUser._id)) {
+      setError("User is already a member")
+      return
+    }
+    setLoading(true)
+    setError("")
+    try {
+      const res = await addTeamMember(event._id, event.participation.team._id, { userId: foundUser._id })
+      setEvent(state => ({ ...state, participation: { ...state.participation, team: { ...state.participation.team, members: [...state.participation.team.members, foundUser] } } }))
+      setFoundUser(null)
+      setSearchQuery("")
+      setLoading(false)
+    } catch (err) {
+      setError(err.message)
+      setLoading(false)
+      setTimeout(() => {
+        setError("")
+      }, 3000)
+    }
+  }
+
+  const handleRemoveMember = async (id) => {
+    setLoading(true)
+    setError("")
+    try {
+      const res = await removeTeamMember(event._id, event.participation.team._id, id)
+      const x = event
+      x.participation.team.members = x.participation.team.members.filter(member => member._id !== id)
+      setEvent(x)
+      setLoading(false)
+    } catch (err) {
+      setError(err.message)
+      setLoading(false)
+      setTimeout(() => {
+        setError("")
+      }, 3000)
+    }
+  }
 
   useEffect(() => {
     getEvent(id)
       .then(res => {
-        setEvent(res.data)
-        if (!res.data.participation?.registrationdetail) {
-          setStep(1)
-        } else {
-          setStep(2)
+        if (res.data.participation.success) {
+          navigate("/dashboard")
         }
-        setPageLoading(false)
+        setEvent(res.data)
+        setTimeout(() => {
+          setPageLoading(false)
+        }, 200)
+        if (!Number(localStorage.getItem(id))) {
+          if (!res.data.participation?.registrationdetail) {
+            setStep(1)
+          } else {
+            setStep(2)
+          }
+        }
       })
       .catch(err => {
         setError(err.message)
@@ -48,7 +126,7 @@ const EventRegistration = () => {
   const handleStep1Submit = (e) => {
     // If not triggered by a form submission, just go to next
     if (e?.preventDefault) e.preventDefault();
-    setStep(isTeamEvent ? 2 : 3);
+    setStep(event.isteamevent ? 2 : 3);
   };
 
   const loadRazorpay = () => {
@@ -69,18 +147,31 @@ const EventRegistration = () => {
     }
 
     const options = {
-      key: "rzp_test_YOUR_KEY_ID", // Dummy key
-      amount: 2600, // 26.00 in smallest unit
-      currency: "USD",
+      key: "rzp_test_SZ5tIdgHK7a4hd",
+      amount: event.registrationfees * 100,
+      currency: "INR",
+      order_id: event.participation.order,
       name: "CampusBuzz",
-      description: "Global Tech Summit Registration",
-      handler: function (response) {
-        alert("Payment Successful! Payment ID: " + response.razorpay_payment_id);
-        navigate('/dashboard'); // Route back to student dashboard
+      description: "Event Registration",
+      handler: async function (response) {
+        console.log(response);
+
+        // alert("Payment Successful! Payment ID: " + response.razorpay_payment_id);
+        try {
+          const res = await completeParticipation(event.participation._id, {
+            paymentId: response.razorpay_payment_id,
+            orderId: response.razorpay_order_id,
+            signature: response.razorpay_signature
+          })
+          console.log(res)
+          navigate("/dashboard")
+        } catch (error) {
+          console.log(error)
+        }
       },
       prefill: {
-        name: "Campus Student",
-        email: "student@university.edu"
+        name: user.name,
+        email: user.email
       },
       theme: { color: "#4f46e5" }
     };
@@ -95,7 +186,13 @@ const EventRegistration = () => {
   return pageLoading ? <PageLoader /> : (
     <PublicLayout>
       <div className="max-w-3xl mx-auto px-6 py-12">
-        <button onClick={() => step > 1 ? setStep(step - 1) : navigate(-1)} className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors mb-8">
+        <button onClick={() => {
+          if (step > 1) {
+            setStep(step - 1)
+            // localStorage.setItem(id, step - 1)
+          }
+          navigate(-1)
+        }} className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors mb-8">
           <ArrowLeft size={16} className="mr-2" /> {step > 1 ? 'Back to previous step' : 'Back to event details'}
         </button>
 
@@ -105,21 +202,21 @@ const EventRegistration = () => {
             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" /> Hackathon 2024
           </span>
           <h1 className="text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">Event Registration</h1>
-          <p className="text-gray-500 max-w-lg mx-auto">Complete the details below to secure your spot in the upcoming university-wide hackathon challenge.</p>
+          <p className="text-gray-500 max-w-lg mx-auto">Complete the steps below to secure your spot in the {event.name}.</p>
         </div>
 
         {/* Stepper */}
         <div className="flex items-center justify-center gap-4 mb-12">
           <button onClick={() => setStep(1)}><div className={`flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm ${step >= 1 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-gray-200 text-gray-500'}`}>1</div></button>
           <div className={`h-1 w-12 rounded-full ${step >= 2 ? 'bg-indigo-600' : 'bg-gray-200'}`} />
-          {isTeamEvent && (
+          {event.isteamevent && (
             <>
               <button onClick={() => { event.participation?.registrationdetail && setStep(2) }}><div className={`flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm ${step >= 2 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-gray-200 text-gray-500'}`}>2</div></button>
               <div className={`h-1 w-12 rounded-full ${step >= 3 ? 'bg-indigo-600' : 'bg-gray-200'}`} />
             </>
           )}
           <div className={`flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm ${step === 3 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-gray-200 text-gray-500'}`}>
-            {isTeamEvent ? '3' : '2'}
+            {event.isteamevent ? '3' : '2'}
           </div>
         </div>
 
@@ -138,15 +235,13 @@ const EventRegistration = () => {
                 </div>
               </div>
 
-              <div onClick={(e) => {
-                // Hack to intercept CustomRegistrationForm submit button directly
-                if (e.target.tagName === 'BUTTON' && e.target.type === 'submit') {
-                  e.preventDefault();
-                  handleStep1Submit();
-                }
-              }}>
-                {/* We use a modified version of CustomRegistrationForm rendered inline to control the flow easily since it's a wizard */}
-                <CustomRegistrationForm fields={MOCK_FIELDS} isPreview={false} eventDetails={{ title: '', desc: '', image: '' }} />
+              <div>
+                <CustomRegistrationForm fields={event.registrationform} isPreview={false} eventDetails={event} filledDetails={event.participation.registrationdetail} updateState={(data) => {
+                  setEvent(state => ({
+                    ...state, participation: { ...state.participation, registrationdetail: data }
+                  }))
+                  setStep(2)
+                }} />
               </div>
             </div>
           )}
@@ -163,30 +258,78 @@ const EventRegistration = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <button className="flex flex-col text-left p-8 rounded-2xl border-2 border-indigo-600 bg-indigo-50/30 ring-4 ring-indigo-50 transition-all">
-                  <div className="w-12 h-12 rounded-full bg-white border border-indigo-100 flex items-center justify-center text-indigo-600 mb-6 shadow-sm">
-                    <UserPlus size={24} />
+              <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
+                <div className="flex flex-col text-left p-8 rounded-2xl border-2 border-indigo-600 bg-indigo-50/30 ring-4 ring-indigo-50 transition-all">
+                  <div className="flex flex-col items-start gap-6">
+                    <div className="w-12 h-12 rounded-full bg-white border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
+                      <UserPlus size={24} />
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">Add a Member</h3>
+                    <p className="text-sm text-gray-500">Add a new member to your team. Team size could be {event.minteamsize} to {event.maxteamsize}.</p>
+                    <div className="w-full flex items-center gap-2 pb-2">
+                      <input
+                        value={searchQuery}
+                        onChange={(e) => {
+                          setSearchQuery(e.target.value)
+                        }}
+                        type="text"
+                        className="w-full p-4 rounded-lg border border-gray-200 text-sm focus:border-indigo-500 focus:ring focus:ring-indigo-100 outline-none transition-shadow"
+                        placeholder='search by email or username' />
+                      <button onClick={handleSearch} className="w-12 h-12 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0"><Search /></button>
+                    </div>
+                    {error && <p className="text-sm text-red-500">{error}</p>}
+                    {foundUser && (
+                      <div className="w-full rounded-lg border border-gray-200 text-sm focus:border-indigo-500 focus:ring focus:ring-indigo-100 outline-none transition-shadow">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className='flex items-center gap-3 p-3'>
+                            <img src={foundUser.avatar || "/" + avatars[Math.floor((foundUser.username.length % avatars.length))]} alt="" className="w-12 h-12 rounded-full" />
+                            <div className="flex flex-col">
+                              <h3 className="text-lg font-bold text-gray-900">{foundUser.name}</h3>
+                              <p className="text-sm text-gray-500">{foundUser.email}</p>
+                            </div>
+                          </div>
+                          <Button disabled={loading} variant='primary' className='px-10 h-18 text-xl' onClick={handleAddMember}>{loading ? "Adding..." : "Add"}</Button>
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <p className='py-3'>Current Team</p>
+                      <div className="flex flex-col gap-2.5">
+                        {event.participation.team?.members?.map(member => (
+                          <div key={member.id} className="flex items-center justify-between gap-5">
+                            <img src={member.avatar || "/" + avatars[Math.floor((member.username.length % avatars.length))]} alt="" className="w-12 h-12 rounded-full" />
+                            <div className="flex flex-col">
+                              <h3 className="text-lg font-bold text-gray-900">{member.name}{member._id === event.participation.participant ? "(You)" : ""}</h3>
+                              <p className="text-sm text-gray-500">{member.email}</p>
+                            </div>
+                            {
+                              member._id === event.participation.participant ? <div className='p-4' /> :
+                                <button title='Remove from team' disabled={loading} onClick={async () => { await handleRemoveMember(member._id) }}><Trash2 color='#de5f2cff' /></button>
+                            }
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-2">Create a New Team</h3>
-                  <p className="text-sm text-gray-500">Start a fresh squad and invite your friends to join.</p>
-                </button>
+                </div>
 
-                <button className="flex flex-col text-left p-8 rounded-2xl border-2 border-gray-100 bg-gray-50 hover:border-gray-300 hover:bg-gray-100 transition-all opacity-70">
+                {/* <button className="flex flex-col text-left p-8 rounded-2xl border-2 border-gray-100 bg-gray-50 hover:border-gray-300 hover:bg-gray-100 transition-all opacity-70">
                   <div className="w-12 h-12 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-400 mb-6 shadow-sm">
                     <Users size={24} />
                   </div>
                   <h3 className="text-lg font-bold text-gray-900 mb-2">Join an Existing Team</h3>
                   <p className="text-sm text-gray-500">Enter a team code to join a pre-registered group.</p>
-                </button>
+                </button> */}
               </div>
 
               <div className="mt-12 flex justify-between items-center border-t border-gray-50 pt-8">
                 <div>
                   <p className="text-xs font-bold tracking-widest text-gray-400 uppercase mb-1">Registration Fee</p>
-                  <p className="text-2xl font-black text-gray-900">$25.00 <span className="text-sm font-semibold text-gray-400">/ person</span></p>
+                  <p className="text-2xl font-black text-gray-900">₹{event.registrationfees} <span className="text-sm font-semibold text-gray-400">/ {event.isteamevent ? 'team' : 'person'}</span></p>
                 </div>
-                <Button size="lg" onClick={() => setStep(3)}>Proceed to Payment</Button>
+                <Button disabled={event.participation.team.members.length < event.minteamsize} size="lg" onClick={() => {
+                  setStep(3)
+                }}>{event.participation.team.members.length < event.minteamsize ? 'Add more members' : 'Proceed to Payment'}</Button>
               </div>
             </div>
           )}
@@ -196,24 +339,24 @@ const EventRegistration = () => {
               <div className="relative w-full h-32 rounded-2xl bg-gradient-to-r from-indigo-900 to-purple-900 overflow-hidden mb-8">
                 <div className="absolute inset-0 bg-white/10 mix-blend-overlay"></div>
                 <div className="absolute bottom-6 left-6">
-                  <p className="text-[10px] font-bold tracking-widest text-indigo-200 uppercase mb-1">Event Name</p>
-                  <h3 className="text-2xl font-bold text-white">Global Tech Summit</h3>
+                  <p className="text-[10px] font-bold tracking-widest text-indigo-200 uppercase mb-1">{event.name}</p>
+                  <h3 className="text-2xl font-bold text-white">{event.description}</h3>
                 </div>
               </div>
 
               <div className="space-y-4 mb-8 text-sm">
                 <div className="flex justify-between text-gray-600">
                   <span className="font-medium">Registration Fee</span>
-                  <span className="font-semibold text-gray-900">$25.00</span>
+                  <span className="font-semibold text-gray-900">₹{event.registrationfees}</span>
                 </div>
-                <div className="flex justify-between text-gray-600">
+                {/* <div className="flex justify-between text-gray-600">
                   <span className="font-medium">Platform Fee</span>
-                  <span className="font-semibold text-gray-900">$1.00</span>
-                </div>
+                  <span className="font-semibold text-gray-900">₹1.00</span>
+                </div> */}
                 <div className="pt-4 border-t border-dashed border-gray-200">
                   <div className="flex justify-between items-end">
                     <span className="text-base font-bold text-gray-900">Total Amount</span>
-                    <span className="text-2xl font-black text-indigo-600">$26.00</span>
+                    <span className="text-2xl font-black text-indigo-600">₹{event.registrationfees}</span>
                   </div>
                 </div>
               </div>
@@ -235,7 +378,7 @@ const EventRegistration = () => {
               </div>
 
               <Button size="lg" fullWidth className="py-4 text-base" onClick={handlePayment}>
-                <ShieldCheck size={18} className="mr-2" /> Pay $26.00 Securely
+                <ShieldCheck size={18} className="mr-2" /> Pay ₹{event.registrationfees} Securely
               </Button>
               <p className="text-center text-[11px] text-gray-400 font-medium uppercase tracking-widest mt-4">✓ 256-bit SSL Encrypted Transaction</p>
             </div>
